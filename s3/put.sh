@@ -67,16 +67,20 @@ cmd+=("-T" "${fileLocal}")
 cmd+=("-X" "${httpMethod}")
 
 cmd+=("-H" "Host: ${host}")
-headers+="host:${host}\n"
-headerList+="host;"
+headers+="host:${host}"
+headerList+="host"
 
 cmd+=("-H" "x-amz-content-sha256: ${payloadHash}")
-headers+="x-amz-content-sha256:${payloadHash}\n"
-headerList+="x-amz-content-sha256;"
+headers+="\nx-amz-content-sha256:${payloadHash}"
+headerList+=";x-amz-content-sha256"
 
 cmd+=("-H" "x-amz-date: ${isoTimestamp}")
-headers+="x-amz-date:${isoTimestamp}"
-headerList+="x-amz-date"
+headers+="\nx-amz-date:${isoTimestamp}"
+headerList+=";x-amz-date"
+
+cmd+=("-H" "x-amz-meta-timestamp: 333666")
+headers+="\nx-amz-meta-timestamp:333666"
+headerList+=";x-amz-meta-timestamp"
 
 # Generate canonical request
 canonicalRequest="${httpMethod}
