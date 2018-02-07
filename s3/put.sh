@@ -1,19 +1,100 @@
 #!/bin/bash
 
-aws_access_key=$1
-aws_secret_key=$2
-file=$3
-bucket=$4
-name=$5
-resource="/${bucket}/${name}" 
-acl="x-amz-acl:public-read" 
-contentType="text/plain" 
-dateValue=$(date +"%a, %d %b %Y %T %z")
-stringToSign="PUT\n\n${contentType}\n${dateValue}\n${resource}" 
-signature=$(echo -en "${stringToSign}" | openssl sha1 -hmac "${aws_secret_key}" -binary | base64)
-curl -L -f -v -X PUT -T "${file}" \
-    -H "Host: ${bucket}.s3.amazonaws.com" \
-    -H "Date: ${dateValue}" \
-    -H "Content-Type: ${contentType}" \
-    -H "Authorization: AWS ${aws_access_key}:${signature}" \
-    https://${bucket}.s3.amazonaws.com/${name}
+hex256() {
+  printf "$1" | od -A n -t x1 | sed ':a;N;$!ba;s/[\n ]//g'
+}
+
+sha256Hash() {
+  output=$(printf "$1" | sha256sum)
+  echo "${output%% *}"
+}
+
+sha256HashFile() {
+  output=$(sha256sum $1)
+  echo "${output%% *}"
+}
+
+hmac_sha256() {
+  printf "$2" | openssl dgst -binary -hex -sha256 -mac HMAC -macopt hexkey:$1 \
+              | sed 's/^.* //'
+}
+
+sign() {
+  kSigning=$(hmac_sha256 $(hmac_sha256 $(hmac_sha256 \
+                 $(hmac_sha256 $(hex256 "AWS4$1") $2) $3) $4) "aws4_request")
+  hmac_sha256 "${kSigning}" "$5"
+}
+
+convS3RegionToEndpoint() {
+  case "$1" in
+    us-east-1) echo "s3.amazonaws.com"
+      ;;
+    *) echo s3-${1}.amazonaws.com
+      ;;
+    esac
+}
+
+awsAccess=$1
+awsSecret=$2
+awsRegion=$3
+fileLocal=$4
+resourcePath="/${5}"
+httpMethod='PUT'
+
+timestamp=$(date -u "+%Y-%m-%d %H:%M:%S")
+isoTimestamp=$(date -ud "${timestamp}" "+%Y%m%dT%H%M%SZ")
+dateScope=$(date -ud "${timestamp}" "+%Y%m%d")
+host=$(convS3RegionToEndpoint "${awsRegion}")
+
+# Generate payload hash
+payloadHash=$(sha256HashFile $fileLocal)
+
+cmd=("curl")
+headers=
+headerList=
+
+cmd+=("--verbose")
+cmd+=("-T" "${fileLocal}")
+cmd+=("-X" "${httpMethod}")
+
+cmd+=("-H" "Host: ${host}")
+headers+="host:${host}\n"
+headerList+="host;"
+
+cmd+=("-H" "x-amz-content-sha256: ${payloadHash}")
+headers+="x-amz-content-sha256:${payloadHash}\n"
+headerList+="x-amz-content-sha256;"
+
+cmd+=("-H" "x-amz-date: ${isoTimestamp}")
+headers+="x-amz-date:${isoTimestamp}"
+headerList+="x-amz-date"
+
+# Generate canonical request
+canonicalRequest="${httpMethod}
+${resourcePath}
+
+${headers}
+
+${headerList}
+${payloadHash}"
+
+# Generated request hash
+hashedRequest=$(sha256Hash "${canonicalRequest}")
+
+# Generate signing data
+stringToSign="AWS4-HMAC-SHA256
+${isoTimestamp}
+${dateScope}/${awsRegion}/s3/aws4_request
+${hashedRequest}"
+
+# Sign data
+signature=$(sign "${awsSecret}" "${dateScope}" "${awsRegion}" "s3" "${stringToSign}")
+
+authorizationHeader="AWS4-HMAC-SHA256 Credential=${awsAccess}/${dateScope}/${awsRegion}/s3/aws4_request, SignedHeaders=${headerList}, Signature=${signature}"
+cmd+=("-H" "Authorization: ${authorizationHeader}")
+
+cmd+=("https://${host}${resourcePath}")
+
+# Curl
+echo "${cmd[@]}"
+"${cmd[@]}"
