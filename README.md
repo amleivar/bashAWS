@@ -1,5 +1,3 @@
 # bashAWS
-Bash scripts to execute AWS operations
+Bash scripts to execute AWS operations using signature v4 (AWS4-HMAC-SHA256)
 
-S3 -> HMAC
-Kinesis -> sigv4 (AWS4-HMAC-SHA256)
